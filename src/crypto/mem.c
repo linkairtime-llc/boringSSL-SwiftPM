@@ -81,28 +81,8 @@ static void __asan_poison_memory_region(const void *addr, size_t size) {}
 static void __asan_unpoison_memory_region(const void *addr, size_t size) {}
 #endif
 
-// Windows doesn't really support weak symbols as of May 2019, and Clang on
-// Windows will emit strong symbols instead. See
-// https://bugs.llvm.org/show_bug.cgi?id=37598
-#if defined(__GNUC__) || (defined(__clang__) && !defined(_MSC_VER))
-// sdallocx is a sized |free| function. By passing the size (which we happen to
-// always know in BoringSSL), the malloc implementation can save work. We cannot
-// depend on |sdallocx| being available so we declare a wrapper that falls back
-// to |free| as a weak symbol.
-//
-// This will always be safe, but will only be overridden if the malloc
-// implementation is statically linked with BoringSSL. So, if |sdallocx| is
-// provided in, say, libc.so, we still won't use it because that's dynamically
-// linked. This isn't an ideal result, but its helps in some cases.
-void sdallocx(void *ptr, size_t size, int flags);
-
-__attribute((weak, noinline))
-#else
-static
-#endif
-void sdallocx(void *ptr, size_t size, int flags) {
-  free(ptr);
-}
+// Lab fork: pair OPENSSL_malloc's libc malloc with libc free directly.
+// Do not export/interpose sdallocx alongside React Native/Folly.
 
 void *OPENSSL_malloc(size_t size) {
   void *ptr = malloc(size + OPENSSL_MALLOC_PREFIX);
@@ -126,7 +106,7 @@ void OPENSSL_free(void *orig_ptr) {
 
   size_t size = *(size_t *)ptr;
   OPENSSL_cleanse(ptr, size + OPENSSL_MALLOC_PREFIX);
-  sdallocx(ptr, size + OPENSSL_MALLOC_PREFIX, 0 /* flags */);
+  free(ptr);
 }
 
 void *OPENSSL_realloc(void *orig_ptr, size_t new_size) {
